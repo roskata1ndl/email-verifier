@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Verifier - Matrix Terminal</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+    * { margin:0; padding:0; box-sizing:border-box; }
+    :root { --g:#00ff41; --gd:#00882a; --gdk:#00441a; --gdp:#001a05; --y:#ffaa00; --r:#ff3333; }
+    body { font-family:'Share Tech Mono',monospace; background:#000; min-height:100vh; color:var(--g); overflow-x:hidden; }
+    #matrix-canvas { position:fixed; top:0; left:0; width:100%; height:100%; z-index:0; opacity:0.13; pointer-events:none; }
+
+    /* ══ BOOT ══ */
+    #boot-screen {
+      position:fixed; inset:0; background:#000; z-index:1000;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      padding:40px; transition:opacity 0.8s ease;
+    }
+    #boot-screen.fade-out { opacity:0; pointer-events:none; }
+    .boot-logo { font-family:'Orbitron',monospace; font-size:clamp(1.4em,4vw,2.8em); font-weight:900; letter-spacing:8px; color:var(--g); margin-bottom:8px; text-shadow:0 0 20px var(--g),0 0 60px var(--g),0 0 120px rgba(0,255,65,0.4); animation:flicker 5s infinite; }
+    .boot-sub { font-size:0.75em; color:var(--gd); letter-spacing:6px; margin-bottom:40px; text-shadow:0 0 10px var(--g); }
+    .boot-terminal { width:100%; max-width:680px; background:rgba(0,10,2,0.97); border:1px solid var(--gd); border-radius:4px; padding:28px 34px; box-shadow:0 0 60px rgba(0,255,65,0.15),inset 0 0 40px rgba(0,0,0,0.8); position:relative; overflow:hidden; }
+    .boot-terminal::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px); pointer-events:none; }
+    .boot-scanline { position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,255,65,0.6),transparent); animation:sc-anim 3s linear infinite; pointer-events:none; z-index:2; }
+    @keyframes sc-anim { 0%{top:0%} 100%{top:calc(100% - 2px)} }
+    .boot-terminal-bar { display:flex; align-items:center; gap:8px; margin-bottom:20px; padding-bottom:12px; border-bottom:1px solid var(--gdk); }
+    .tbar-dot { width:10px; height:10px; border-radius:50%; background:var(--gdk); }
+    .tbar-dot.active { background:var(--g); box-shadow:0 0 6px var(--g); }
+    .boot-terminal-title { font-size:11px; color:var(--gd); letter-spacing:3px; margin:0 auto; }
+    .boot-lines { font-size:13px; line-height:2; min-height:220px; }
+    .boot-line { display:flex; align-items:center; gap:10px; opacity:0; transform:translateX(-8px); transition:opacity 0.25s,transform 0.25s; }
+    .boot-line.show { opacity:1; transform:translateX(0); }
+    .boot-line .prompt { color:var(--gd); flex-shrink:0; }
+    .boot-line .text   { color:var(--g); }
+    .boot-line .ok     { color:var(--g); margin-left:auto; flex-shrink:0; opacity:0; transition:opacity 0.3s; }
+    .boot-line .ok.show { opacity:1; }
+    .boot-line .ok.ready { text-shadow:0 0 15px var(--g),0 0 30px var(--g); }
+    .boot-enter-btn { margin-top:24px; width:100%; padding:16px; background:transparent; border:1px solid var(--g); color:var(--g); font-family:'Orbitron',monospace; font-size:14px; font-weight:700; letter-spacing:5px; text-transform:uppercase; cursor:pointer; border-radius:2px; opacity:0; transition:opacity 0.5s,background 0.2s,box-shadow 0.2s; text-shadow:0 0 8px var(--g); position:relative; overflow:hidden; }
+    .boot-enter-btn::before { content:''; position:absolute; top:0; left:-100%; width:100%; height:100%; background:linear-gradient(90deg,transparent,rgba(0,255,65,0.15),transparent); transition:left 0.5s; }
+    .boot-enter-btn:hover::before { left:100%; }
+    .boot-enter-btn.visible { opacity:1; animation:btn-pulse 2s ease-in-out infinite; }
+    .boot-enter-btn:hover { background:rgba(0,255,65,0.1); box-shadow:0 0 40px rgba(0,255,65,0.4); animation:none; }
+    @keyframes btn-pulse { 0%,100%{box-shadow:0 0 15px rgba(0,255,65,0.2)} 50%{box-shadow:0 0 35px rgba(0,255,65,0.5)} }
+
+    /* ══ APP ══ */
+    #app { display:none; min-height:100vh; padding:20px; position:relative; z-index:1; opacity:0; transition:opacity 0.6s ease; }
+    #app.visible { display:block; }
+    #app.fade-in { opacity:1; }
+    .container { max-width:1500px; margin:auto; }
+    h1 { color:var(--g); text-align:center; margin-bottom:10px; font-family:'Orbitron',monospace; font-size:2.2em; font-weight:900; letter-spacing:6px; text-transform:uppercase; text-shadow:0 0 20px var(--g),0 0 40px var(--g),0 0 80px var(--g); animation:flicker 4s infinite; }
+    .subtitle { text-align:center; color:var(--gd); font-size:0.8em; letter-spacing:4px; margin-bottom:30px; text-shadow:0 0 10px var(--g); }
+    @keyframes flicker { 0%,95%,100%{opacity:1} 96%{opacity:0.6} 97%{opacity:1} 98%{opacity:0.4} 99%{opacity:1} }
+
+    /* ── Widgets Row ── */
+    .widgets-row { display:grid; grid-template-columns:1fr 220px; gap:20px; margin-bottom:24px; align-items:start; }
+
+    /* ── Clock Panel ── */
+    .clock-panel { background:rgba(0,10,2,0.97); border:1px solid var(--gdk); border-radius:4px; padding:14px 18px; box-shadow:0 0 20px rgba(0,255,65,0.07); }
+    .clock-panel-title { font-family:'Orbitron',monospace; font-size:0.58em; letter-spacing:4px; color:var(--gd); margin-bottom:12px; }
+    .clock-panel-title::before { content:'> '; }
+    .clocks-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+    .clock-item { background:#000; border:1px solid var(--gdk); border-radius:2px; padding:10px 6px; text-align:center; position:relative; overflow:hidden; }
+    .clock-item::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--gdk),transparent); }
+    .clock-tz    { font-size:9px; letter-spacing:2px; color:var(--gd); text-transform:uppercase; margin-bottom:6px; display:block; }
+    .clock-time  { font-family:'Orbitron',monospace; font-size:1.05em; font-weight:700; color:var(--g); text-shadow:0 0 10px var(--g); display:block; letter-spacing:1px; }
+    .clock-date  { font-size:9px; color:var(--gdk); margin-top:4px; display:block; letter-spacing:1px; }
+    .clock-item.nyc .clock-time { color:#00d4ff; text-shadow:0 0 10px #00d4ff; }
+    .clock-item.nyc .clock-tz   { color:#0099bb; }
+    .clock-item.dub .clock-time { color:var(--y); text-shadow:0 0 10px var(--y); }
+    .clock-item.dub .clock-tz   { color:#996600; }
+
+    /* ── Game Panel ── */
+    .game-panel { background:rgba(0,10,2,0.97); border:1px solid var(--gdk); border-radius:4px; overflow:hidden; box-shadow:0 0 20px rgba(0,255,65,0.07); }
+    .game-panel-header { background:rgba(0,255,65,0.05); border-bottom:1px solid var(--gdk); padding:10px 12px; display:flex; align-items:center; gap:8px; }
+    .game-panel-title { font-family:'Orbitron',monospace; font-size:0.55em; letter-spacing:3px; color:var(--g); }
+    .game-score-box { margin-left:auto; font-size:10px; color:var(--gd); letter-spacing:1px; }
+    #game-score { color:var(--g); font-family:'Orbitron',monospace; }
+    .game-wrap { position:relative; background:#000; }
+    #game-canvas { display:block; image-rendering:pixelated; width:220px; height:187px; }
+    .game-overlay-msg { position:absolute; inset:0; background:rgba(0,0,0,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; }
+    .game-overlay-msg.hidden { display:none; }
+    .go-title { font-family:'Orbitron',monospace; font-size:0.9em; letter-spacing:3px; }
+    .go-title.red { color:var(--r); text-shadow:0 0 15px var(--r); }
+    .go-title.grn { color:var(--g); text-shadow:0 0 12px var(--g); }
+    .go-sub { font-size:10px; color:var(--gd); letter-spacing:2px; }
+    .go-sub2 { font-size:9px; color:var(--gdk); letter-spacing:1px; }
+    .go-restart { margin-top:4px; padding:5px 14px; border:1px solid var(--g); color:var(--g); background:transparent; cursor:pointer; font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; transition:0.2s; }
+    .go-restart:hover { background:rgba(0,255,65,0.1); box-shadow:0 0 10px rgba(0,255,65,0.3); }
+    .game-arrows { display:flex; justify-content:center; padding:7px 0 8px; border-top:1px solid var(--gdk); background:rgba(0,5,0,0.8); }
+    .arr-grid { display:grid; grid-template-columns:28px 28px 28px; grid-template-rows:28px 28px; gap:3px; }
+    .arr-btn { border:1px solid var(--gdk); background:rgba(0,255,65,0.04); color:var(--gd); font-size:12px; cursor:pointer; border-radius:2px; display:flex; align-items:center; justify-content:center; transition:0.15s; user-select:none; }
+    .arr-btn:active, .arr-btn.pressed { background:rgba(0,255,65,0.15); border-color:var(--g); color:var(--g); box-shadow:0 0 6px rgba(0,255,65,0.3); }
+
+    /* ── App Layout ── */
+    .app-layout { display:grid; grid-template-columns:1fr 340px; gap:30px; align-items:start; }
+    .app-main { min-width:0; }
+
+    /* ── Drop Zone ── */
+    #drop-zone { background:rgba(0,255,65,0.03); border:2px solid var(--g); border-radius:4px; padding:60px 40px; text-align:center; cursor:pointer; transition:all 0.3s ease; margin:0 0 20px; box-shadow:0 0 20px rgba(0,255,65,0.2),inset 0 0 20px rgba(0,255,65,0.05); position:relative; overflow:hidden; }
+    #drop-zone::before { content:''; position:absolute; top:-2px;left:-2px;right:-2px;bottom:-2px; border:1px solid rgba(0,255,65,0.3); border-radius:4px; pointer-events:none; }
+    #drop-zone::after  { content:''; position:absolute; inset:8px; border:1px dashed rgba(0,255,65,0.12); border-radius:2px; pointer-events:none; }
+    #drop-zone:hover   { background:rgba(0,255,65,0.07); box-shadow:0 0 40px rgba(0,255,65,0.4),inset 0 0 30px rgba(0,255,65,0.1); transform:translateY(-2px); }
+    #drop-zone.hover   { background:rgba(0,255,65,0.1); box-shadow:0 0 60px rgba(0,255,65,0.5),inset 0 0 40px rgba(0,255,65,0.15); }
+    #drop-zone p { font-size:1.2em; color:var(--g); font-weight:600; text-shadow:0 0 10px var(--g); letter-spacing:2px; }
+    #drop-zone small { color:var(--gd); letter-spacing:2px; }
+    .drop-icon { font-size:3em; display:block; margin-bottom:15px; filter:drop-shadow(0 0 10px var(--g)); }
+
+    /* ── Upload Scan Overlay ── */
+    .upload-scan-overlay {
+      position:absolute; inset:0; background:rgba(0,0,0,0.93);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      z-index:10; border-radius:2px; opacity:0; pointer-events:none; transition:opacity 0.3s; gap:0;
+    }
+    .upload-scan-overlay.active { opacity:1; pointer-events:all; }
+    .scan-grid { position:absolute; inset:0; background-image:linear-gradient(rgba(0,255,65,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,65,0.04) 1px,transparent 1px); background-size:20px 20px; animation:grid-pulse 2s ease-in-out infinite; }
+    @keyframes grid-pulse { 0%,100%{opacity:0.5} 50%{opacity:1} }
+    /* Beam is clipped to the overlay via overflow:hidden on parent */
+    .scan-beam { position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,transparent,var(--g),rgba(0,255,65,0.3),transparent); box-shadow:0 0 15px var(--g),0 0 30px rgba(0,255,65,0.5); animation:beam-sweep 1.2s linear infinite; }
+    @keyframes beam-sweep { 0%{top:0px} 100%{top:calc(100% - 3px)} }
+    /* Ring wrapper — ring + checkmark together */
+    .scan-ring-wrap { position:relative; width:84px; height:84px; z-index:2; margin-bottom:14px; flex-shrink:0; }
+    .scan-progress-ring { width:84px; height:84px; display:block; }
+    .scan-progress-ring circle { fill:none; stroke-width:2.5; }
+    .scan-ring-bg { stroke:var(--gdk); }
+    .scan-ring-fg { stroke:var(--g); stroke-linecap:round; filter:drop-shadow(0 0 4px var(--g)); stroke-dasharray:238; stroke-dashoffset:238; transform:rotate(-90deg); transform-origin:42px 42px; animation:ring-fill 1.8s ease-out forwards; }
+    @keyframes ring-fill { to{stroke-dashoffset:0} }
+    /* Checkmark dead-center in wrap */
+    .scan-checkmark { position:absolute; top:50%; left:50%; transform:translate(-50%,-52%); font-size:1.9em; opacity:0; transition:opacity 0.3s; z-index:3; color:var(--g); text-shadow:0 0 20px var(--g); line-height:1; }
+    .scan-text     { font-family:'Orbitron',monospace; font-size:0.85em; letter-spacing:4px; color:var(--g); text-shadow:0 0 15px var(--g); z-index:2; text-align:center; }
+    .scan-filename { font-size:0.62em; color:var(--gd); margin-top:6px; letter-spacing:1px; z-index:2; text-align:center; padding:0 30px; word-break:break-all; max-width:100%; }
+
+    /* ── Side Monitor ── */
+    .side-monitor { position:sticky; top:20px; background:rgba(0,10,2,0.97); border:1px solid var(--gd); border-radius:4px; overflow:hidden; box-shadow:0 0 30px rgba(0,255,65,0.15),inset 0 0 30px rgba(0,0,0,0.7); }
+    .side-monitor-header { background:rgba(0,255,65,0.06); border-bottom:1px solid var(--gdk); padding:12px 16px; display:flex; align-items:center; gap:10px; }
+    .monitor-dot { width:8px; height:8px; background:var(--g); border-radius:50%; box-shadow:0 0 8px var(--g); animation:pulse 1.2s infinite; }
+    .monitor-dot.idle { background:var(--gdk); box-shadow:none; animation:none; }
+    .side-monitor-title { font-family:'Orbitron',monospace; font-size:0.65em; letter-spacing:3px; color:var(--g); text-shadow:0 0 8px var(--g); }
+    .monitor-count { margin-left:auto; font-size:11px; color:var(--gd); letter-spacing:1px; }
+    .side-monitor-feed { height:440px; overflow-y:auto; padding:10px; font-size:11px; line-height:1.7; position:relative; }
+    .side-monitor-feed::-webkit-scrollbar{width:4px} .side-monitor-feed::-webkit-scrollbar-track{background:#000} .side-monitor-feed::-webkit-scrollbar-thumb{background:var(--gdk);border-radius:2px}
+    .monitor-idle-msg { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--gdk); text-align:center; gap:12px; font-size:12px; letter-spacing:2px; }
+    .monitor-idle-icon { font-size:2.5em; opacity:0.3; }
+    .monitor-log-line { padding:3px 6px; margin:1px 0; border-radius:1px; display:flex; gap:8px; align-items:flex-start; border-left:2px solid transparent; transition:background 0.2s; }
+    .monitor-log-line:hover { background:rgba(0,255,65,0.04); }
+    .monitor-log-line.valid   { color:var(--g);  border-left-color:var(--g); }
+    .monitor-log-line.risky   { color:var(--y);  border-left-color:var(--y); }
+    .monitor-log-line.invalid { color:var(--r);  border-left-color:var(--r); }
+    .monitor-log-line .mdot { width:5px; height:5px; border-radius:50%; flex-shrink:0; margin-top:5px; }
+    .monitor-log-line.valid   .mdot { background:var(--g);  box-shadow:0 0 4px var(--g); }
+    .monitor-log-line.risky   .mdot { background:var(--y);  box-shadow:0 0 4px var(--y); }
+    .monitor-log-line.invalid .mdot { background:var(--r);  box-shadow:0 0 4px var(--r); }
+    .side-monitor-stats { border-top:1px solid var(--gdk); padding:12px 16px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; background:rgba(0,5,0,0.8); }
+    .ms-stat { text-align:center; padding:8px 4px; border:1px solid var(--gdk); border-radius:2px; background:rgba(0,255,65,0.02); }
+    .ms-stat .msv { font-family:'Orbitron',monospace; font-size:1.3em; display:block; }
+    .ms-stat .msl { font-size:9px; letter-spacing:1px; color:var(--gd); text-transform:uppercase; display:block; margin-top:2px; }
+    .ms-stat.valid   .msv { color:var(--g);  text-shadow:0 0 8px var(--g); }
+    .ms-stat.risky   .msv { color:var(--y);  text-shadow:0 0 8px var(--y); }
+    .ms-stat.invalid .msv { color:var(--r);  text-shadow:0 0 8px var(--r); }
+
+    /* ── Job Blocks ── */
+    .job-block { background:rgba(0,10,2,0.95); border:1px solid var(--g); border-radius:4px; padding:30px; margin:0 0 20px; box-shadow:0 0 30px rgba(0,255,65,0.2),inset 0 0 30px rgba(0,0,0,0.5); position:relative; overflow:hidden; animation:job-enter 0.4s ease-out; }
+    @keyframes job-enter { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
+    .job-block::after { content:''; position:absolute; inset:0; pointer-events:none; z-index:0; background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.05) 2px,rgba(0,0,0,0.05) 4px); }
+    .job-block > * { position:relative; z-index:1; }
+    .job-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--gd); padding-bottom:15px; }
+    .job-header h3 { color:var(--g); font-size:1em; letter-spacing:2px; text-shadow:0 0 8px var(--g); }
+    .job-header h3::before { content:'> '; color:var(--gd); }
+    .close-job { cursor:pointer; font-size:18px; color:var(--gd); width:28px; height:28px; display:flex; align-items:center; justify-content:center; border:1px solid var(--gd); border-radius:2px; transition:0.2s; font-family:monospace; }
+    .close-job:hover { background:rgba(255,0,0,0.15); color:var(--r); border-color:var(--r); box-shadow:0 0 10px rgba(255,0,0,0.3); }
+    .progress-container { background:var(--gdp); border:1px solid var(--gd); border-radius:2px; height:28px; overflow:hidden; margin:20px 0; }
+    .progress-bar { height:100%; background:linear-gradient(90deg,#003a0f,var(--g),#003a0f); background-size:200% 100%; animation:prog-glow 1.5s linear infinite; width:0%; transition:width 0.3s ease; display:flex; align-items:center; justify-content:center; color:#000; font-weight:700; font-size:13px; letter-spacing:2px; font-family:'Orbitron',monospace; }
+    @keyframes prog-glow { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+    .current-email-banner { background:rgba(0,255,65,0.05); border:1px solid var(--gd); border-left:3px solid var(--g); border-radius:2px; padding:10px 15px; margin:10px 0; display:flex; align-items:center; gap:12px; font-size:13px; min-height:42px; }
+    .current-email-banner .label { font-weight:700; white-space:nowrap; color:var(--gd); letter-spacing:1px; font-size:11px; }
+    .current-email-banner .email-value { font-family:'Share Tech Mono',monospace; font-size:13px; color:var(--g); word-break:break-all; text-shadow:0 0 8px var(--g); }
+    .pulse-dot { width:8px; height:8px; background:var(--g); border-radius:50%; flex-shrink:0; box-shadow:0 0 8px var(--g); animation:pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 8px var(--g)} 50%{opacity:0.3;transform:scale(0.6);box-shadow:0 0 2px var(--g)} }
+    .status { text-align:center; font-size:13px; margin:12px 0; color:var(--gd); letter-spacing:2px; }
+    .spinner { display:inline-block; margin-right:8px; animation:spin 1s linear infinite; }
+    @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin:20px 0; }
+    .actions button,.actions a { padding:10px 20px; border-radius:2px; border:1px solid; cursor:pointer; font-weight:600; font-size:12px; font-family:'Share Tech Mono',monospace; transition:0.2s; text-decoration:none; display:inline-block; letter-spacing:1px; text-transform:uppercase; }
+    .btn-cancel   { background:transparent; color:var(--r); border-color:var(--r); }
+    .btn-cancel:hover   { background:rgba(255,51,51,0.1); box-shadow:0 0 15px rgba(255,51,51,0.3); }
+    .btn-download { background:transparent; color:var(--g); border-color:var(--g); }
+    .btn-download:hover { background:rgba(0,255,65,0.1); box-shadow:0 0 15px rgba(0,255,65,0.3); }
+    .results-container { margin-top:30px; padding-top:20px; border-top:1px solid var(--gd); }
+    .chart-wrapper { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:20px 0; }
+    .chart-box { background:#000; border:1px solid var(--gd); border-radius:2px; padding:20px; }
+    .chart-box h4 { color:var(--g); margin-bottom:15px; font-size:0.85em; letter-spacing:3px; text-transform:uppercase; text-shadow:0 0 8px var(--g); }
+    .chart-box h4::before { content:'// '; color:var(--gd); }
+    .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:20px 0; }
+    .stat-card { background:#000; border:1px solid var(--gd); border-radius:2px; color:var(--g); padding:20px; text-align:center; position:relative; overflow:hidden; }
+    .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--g),transparent); }
+    .stat-card h4 { font-family:'Orbitron',monospace; font-size:2em; margin-bottom:5px; text-shadow:0 0 15px var(--g); }
+    .stat-card p  { font-size:0.75em; color:var(--gd); letter-spacing:2px; text-transform:uppercase; }
+    .stat-card.risky  h4 { color:var(--y); text-shadow:0 0 15px var(--y); } .stat-card.risky  p { color:#aa7000; } .stat-card.risky  { border-color:#aa7000; }
+    .stat-card.invalid h4 { color:var(--r); text-shadow:0 0 15px var(--r); } .stat-card.invalid p { color:#aa2222; } .stat-card.invalid { border-color:#aa2222; }
+    .filter-panel { background:#000; border:1px solid var(--gd); border-radius:2px; padding:20px; margin:20px 0; }
+    .filter-panel h4 { color:var(--g); margin-bottom:8px; font-size:0.9em; letter-spacing:3px; text-transform:uppercase; text-shadow:0 0 8px var(--g); }
+    .filter-panel h4::before { content:'> '; color:var(--gd); }
+    .filter-section { margin-bottom:20px; }
+    .filter-section-title { font-weight:600; color:var(--gd); margin-bottom:10px; font-size:0.8em; text-transform:uppercase; letter-spacing:3px; }
+    .filter-section-title::before { content:'# '; }
+    .filter-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px; }
+    .filter-item { display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(0,255,65,0.03); border:1px solid var(--gdk); border-radius:2px; cursor:pointer; transition:0.2s; }
+    .filter-item:hover { background:rgba(0,255,65,0.08); border-color:var(--gd); }
+    .filter-item input[type="checkbox"] { width:14px; height:14px; cursor:pointer; accent-color:var(--g); }
+    .filter-item label { cursor:pointer; font-size:12px; color:var(--gd); letter-spacing:1px; }
+    .download-custom { background:transparent; color:var(--g); border:1px solid var(--g); padding:14px 30px; border-radius:2px; cursor:pointer; font-family:'Share Tech Mono',monospace; font-weight:700; font-size:13px; letter-spacing:3px; text-transform:uppercase; transition:0.2s; margin-top:15px; width:100%; }
+    .download-custom:hover { background:rgba(0,255,65,0.1); box-shadow:0 0 20px rgba(0,255,65,0.3); }
+    footer { text-align:center; color:var(--gdk); margin-top:50px; font-size:11px; letter-spacing:3px; text-transform:uppercase; padding-bottom:30px; }
+    .blink { animation:blink 1s step-end infinite; }
+    @keyframes blink { 50%{opacity:0} }
+
+    @media(max-width:1100px) { .app-layout{grid-template-columns:1fr} .side-monitor{position:static} .widgets-row{grid-template-columns:1fr} .game-panel{width:100%} .clocks-grid{grid-template-columns:repeat(3,1fr)} }
+    @media(max-width:700px)  { .chart-wrapper{grid-template-columns:1fr} h1{font-size:1.4em;letter-spacing:3px} .clocks-grid{grid-template-columns:repeat(2,1fr)} }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<canvas id="matrix-canvas"></canvas>
+
+<!-- ══ BOOT SCREEN ══ -->
+<div id="boot-screen">
+  <div class="boot-logo">[ EMAIL VERIFIER ]</div>
+  <div class="boot-sub">// MATRIX TERMINAL v4.0 //</div>
+  <div class="boot-terminal">
+    <div class="boot-scanline"></div>
+    <div class="boot-terminal-bar">
+      <div class="tbar-dot active"></div><div class="tbar-dot"></div><div class="tbar-dot"></div>
+      <div class="boot-terminal-title">SYSTEM DIAGNOSTIC — BOOT SEQUENCE</div>
+    </div>
+    <div class="boot-lines" id="boot-lines"></div>
+    <button class="boot-enter-btn" id="boot-enter-btn" onclick="enterApp()">▶ ENTER SYSTEM</button>
+  </div>
+</div>
+
+<!-- ══ MAIN APP ══ -->
+<div id="app">
+  <div class="container">
+    <h1>[ EMAIL VERIFIER ]</h1>
+    <p class="subtitle">// MATRIX TERMINAL v4.0 // NEURAL SCAN ACTIVE //</p>
+
+    <!-- Widgets Row -->
+    <div class="widgets-row">
+      <!-- World Clocks -->
+      <div class="clock-panel">
+        <div class="clock-panel-title">WORLD CLOCK — TIMEZONE MATRIX</div>
+        <div class="clocks-grid">
+          <div class="clock-item">
+            <span class="clock-tz">UTC</span>
+            <span class="clock-time" id="clock-utc">--:--:--</span>
+            <span class="clock-date" id="date-utc">---</span>
+          </div>
+          <div class="clock-item">
+            <span class="clock-tz">BERLIN</span>
+            <span class="clock-time" id="clock-ber">--:--:--</span>
+            <span class="clock-date" id="date-ber">---</span>
+          </div>
+          <div class="clock-item">
+            <span class="clock-tz">SOFIA</span>
+            <span class="clock-time" id="clock-sof">--:--:--</span>
+            <span class="clock-date" id="date-sof">---</span>
+          </div>
+          <div class="clock-item dub">
+            <span class="clock-tz">DUBAI</span>
+            <span class="clock-time" id="clock-dub">--:--:--</span>
+            <span class="clock-date" id="date-dub">---</span>
+          </div>
+          <div class="clock-item nyc">
+            <span class="clock-tz">NEW YORK</span>
+            <span class="clock-time" id="clock-nyc">--:--:--</span>
+            <span class="clock-date" id="date-nyc">---</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Snake Game -->
+      <div class="game-panel">
+        <div class="game-panel-header">
+          <div class="game-panel-title">SNAKE.EXE</div>
+          <div class="game-score-box">SC:<span id="game-score">0</span></div>
+        </div>
+        <div class="game-wrap">
+          <canvas id="game-canvas" width="220" height="187"></canvas>
+          <div class="game-overlay-msg" id="g-start">
+            <div class="go-title grn">SNAKE.EXE</div>
+            <div class="go-sub">PRESS ↑ TO START</div>
+            <div class="go-sub2">arrow keys / buttons</div>
+          </div>
+          <div class="game-overlay-msg hidden" id="g-over">
+            <div class="go-title red">GAME OVER</div>
+            <div class="go-sub" id="g-score-disp">SCORE: 0</div>
+            <button class="go-restart" onclick="restartGame()">[ RESTART ]</button>
+          </div>
+        </div>
+        <div class="game-arrows">
+          <div class="arr-grid">
+            <div></div>
+            <button class="arr-btn" id="ab-up"    onmousedown="gameDirBtn('UP')"    ontouchstart="e_touch(event,'UP')">▲</button>
+            <div></div>
+            <button class="arr-btn" id="ab-left"  onmousedown="gameDirBtn('LEFT')"  ontouchstart="e_touch(event,'LEFT')">◀</button>
+            <button class="arr-btn" id="ab-down"  onmousedown="gameDirBtn('DOWN')"  ontouchstart="e_touch(event,'DOWN')">▼</button>
+            <button class="arr-btn" id="ab-right" onmousedown="gameDirBtn('RIGHT')" ontouchstart="e_touch(event,'RIGHT')">▶</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main area -->
+    <div class="app-layout">
+      <div class="app-main">
+        <div id="drop-zone">
+          <div class="upload-scan-overlay" id="upload-scan-overlay">
+            <div class="scan-grid"></div>
+            <div class="scan-beam"></div>
+            <div class="scan-ring-wrap">
+              <svg class="scan-progress-ring" viewBox="0 0 84 84">
+                <circle class="scan-ring-bg" cx="42" cy="42" r="38"/>
+                <circle class="scan-ring-fg" id="scan-ring-fg" cx="42" cy="42" r="38"/>
+              </svg>
+              <div class="scan-checkmark" id="scan-checkmark">✓</div>
+            </div>
+            <div class="scan-text" id="scan-text">ANALYZING FILE...</div>
+            <div class="scan-filename" id="scan-filename"></div>
+          </div>
+          <span class="drop-icon">📡</span>
+          <p>&gt; DROP CSV TO INITIATE SCAN_</p>
+          <small>// bulk email verification protocol //</small>
+        </div>
+        <input type="file" id="file-input" accept=".csv" style="display:none;">
+        <div id="jobs"></div>
+      </div>
+
+      <!-- Side Monitor -->
+      <div class="side-monitor">
+        <div class="side-monitor-header">
+          <div class="monitor-dot idle" id="monitor-dot"></div>
+          <div class="side-monitor-title">LIVE FEED</div>
+          <div class="monitor-count" id="monitor-count">0 entries</div>
+        </div>
+        <div class="side-monitor-feed" id="side-feed">
+          <div class="monitor-idle-msg" id="monitor-idle">
+            <div class="monitor-idle-icon">📡</div>
+            <div>AWAITING TARGET DATA</div>
+            <div style="font-size:10px;opacity:0.6;">upload csv to begin monitoring</div>
+          </div>
+        </div>
+        <div class="side-monitor-stats">
+          <div class="ms-stat valid">  <span class="msv" id="ms-valid">0</span>  <span class="msl">Valid</span></div>
+          <div class="ms-stat risky">  <span class="msv" id="ms-risky">0</span>  <span class="msl">Risky</span></div>
+          <div class="ms-stat invalid"><span class="msv" id="ms-invalid">0</span><span class="msl">Dead</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer>&gt; system online // neural verification engine // all targets scanned &lt;</footer>
+</div>
+
+<script>
+// ─── Matrix Rain ────────────────────────────────────────────
+const MC = document.getElementById('matrix-canvas'), MX = MC.getContext('2d');
+const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()アイウエオカキクケコ';
+const FSIZ = 14;
+let drops = [];
+function resizeMC() { MC.width=window.innerWidth; MC.height=window.innerHeight; drops=Array(Math.floor(MC.width/FSIZ)).fill(1); }
+window.addEventListener('resize', resizeMC); resizeMC();
+setInterval(()=>{
+  MX.fillStyle='rgba(0,0,0,0.05)'; MX.fillRect(0,0,MC.width,MC.height);
+  MX.fillStyle='#00ff41'; MX.font=FSIZ+'px Share Tech Mono,monospace';
+  drops.forEach((y,i)=>{
+    MX.fillText(CHARS[Math.floor(Math.random()*CHARS.length)],i*FSIZ,y*FSIZ);
+    if(y*FSIZ>MC.height&&Math.random()>0.975) drops[i]=0;
+    drops[i]++;
+  });
+}, 50);
+
+// ─── Boot Sequence ──────────────────────────────────────────
+const BOOT = [
+  {t:'Initializing neural core...............', r:'OK',    d:0,    rd:600 },
+  {t:'Loading cryptographic modules..........', r:'OK',    d:700,  rd:500 },
+  {t:'Mounting SMTP probe array..............', r:'OK',    d:1350, rd:700 },
+  {t:'Establishing DNS resolver pool.........', r:'OK',    d:2150, rd:600 },
+  {t:'Testing backend connection..............', r:'OK',    d:2900, rd:800 },
+  {t:'Calibrating scan engine................', r:'OK',    d:3850, rd:550 },
+  {t:'Verifying API endpoints................', r:'OK',    d:4550, rd:600 },
+  {t:'All systems operational. Ready.........', r:'READY', d:5400, rd:400 },
+];
+(function runBoot() {
+  const el = document.getElementById('boot-lines');
+  BOOT.forEach((item,i) => {
+    setTimeout(()=>{
+      const line = document.createElement('div');
+      line.className = 'boot-line';
+      line.innerHTML = `<span class="prompt">${String(i+1).padStart(2,'0')} $</span><span class="text">${item.t}</span><span class="ok" id="br-${i}"></span>`;
+      el.appendChild(line);
+      requestAnimationFrame(()=>setTimeout(()=>line.classList.add('show'),20));
+      setTimeout(()=>{
+        const r = document.getElementById(`br-${i}`);
+        if(!r) return;
+        r.textContent=`[ ${item.r} ]`; r.classList.add('show');
+        if(item.r==='READY') r.classList.add('ready');
+      }, item.rd);
+    }, item.d);
+  });
+  setTimeout(()=>document.getElementById('boot-enter-btn').classList.add('visible'), 6200);
+})();
+
+function enterApp() {
+  const boot=document.getElementById('boot-screen'), app=document.getElementById('app');
+  boot.classList.add('fade-out'); app.classList.add('visible');
+  setTimeout(()=>{ app.classList.add('fade-in'); boot.style.display='none'; }, 800);
+}
+
+// ─── World Clocks ───────────────────────────────────────────
+const TZ_MAP = {utc:'UTC', ber:'Europe/Berlin', sof:'Europe/Sofia', dub:'Asia/Dubai', nyc:'America/New_York'};
+function updateClocks() {
+  const now = new Date();
+  Object.entries(TZ_MAP).forEach(([k,tz])=>{
+    const te=document.getElementById('clock-'+k), de=document.getElementById('date-'+k);
+    if(!te) return;
+    te.textContent = new Intl.DateTimeFormat('en-GB',{timeZone:tz,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(now);
+    de.textContent = new Intl.DateTimeFormat('en-GB',{timeZone:tz,day:'2-digit',month:'short'}).format(now).toUpperCase();
+  });
+}
+updateClocks(); setInterval(updateClocks, 1000);
+
+// ─── Snake Game ─────────────────────────────────────────────
+const GCV = document.getElementById('game-canvas'), GX = GCV.getContext('2d');
+const COLS=22, ROWS=18, CS=10;
+let snake, dir, nextDir, food, score, running, started, gLoop;
+
+function drawG() {
+  GX.fillStyle='#000'; GX.fillRect(0,0,GCV.width,GCV.height);
+  // Grid lines
+  GX.strokeStyle='rgba(0,255,65,0.05)'; GX.lineWidth=0.5;
+  for(let x=0;x<=COLS;x++){GX.beginPath();GX.moveTo(x*CS,0);GX.lineTo(x*CS,ROWS*CS);GX.stroke();}
+  for(let y=0;y<=ROWS;y++){GX.beginPath();GX.moveTo(0,y*CS);GX.lineTo(COLS*CS,y*CS);GX.stroke();}
+  // Food (pulsing)
+  const p=0.55+0.45*Math.sin(Date.now()/180);
+  GX.shadowColor='#ff3333'; GX.shadowBlur=10*p;
+  GX.fillStyle='#ff3333'; GX.fillRect(food.x*CS+1,food.y*CS+1,CS-2,CS-2);
+  GX.shadowBlur=0;
+  // Snake
+  snake.forEach((s,i)=>{
+    const head=i===0;
+    GX.shadowColor=head?'#00ff41':'#00882a'; GX.shadowBlur=head?10:3;
+    GX.fillStyle=head?'#00ff41':'#00882a';
+    GX.fillRect(s.x*CS+1,s.y*CS+1,CS-2,CS-2);
+    if(head){GX.fillStyle='#000';GX.fillRect(s.x*CS+3,s.y*CS+3,2,2);}
+  });
+  GX.shadowBlur=0;
+  // Mini score
+  GX.fillStyle='#00441a'; GX.font='8px Share Tech Mono,monospace'; GX.fillText('SC:'+score,3,9);
+}
+
+function spawnFood(){
+  do { food={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)}; }
+  while(snake.some(s=>s.x===food.x&&s.y===food.y));
+}
+
+function initGame(){
+  snake=[{x:11,y:9},{x:10,y:9},{x:9,y:9}];
+  dir={x:1,y:0}; nextDir={x:1,y:0}; score=0; running=false; started=false;
+  clearInterval(gLoop);
+  document.getElementById('game-score').textContent='0';
+  document.getElementById('g-over').classList.add('hidden');
+  document.getElementById('g-start').classList.remove('hidden');
+  spawnFood(); drawG();
+}
+
+function startGame(){
+  document.getElementById('g-start').classList.add('hidden');
+  document.getElementById('g-over').classList.add('hidden');
+  running=true; started=true;
+  gLoop=setInterval(()=>{ stepGame(); drawG(); },130);
+}
+
+function stepGame(){
+  dir={...nextDir};
+  const h={x:snake[0].x+dir.x, y:snake[0].y+dir.y};
+  if(h.x<0||h.x>=COLS||h.y<0||h.y>=ROWS||snake.some(s=>s.x===h.x&&s.y===h.y)) return endGame();
+  snake.unshift(h);
+  if(h.x===food.x&&h.y===food.y){ score++; document.getElementById('game-score').textContent=score; spawnFood(); }
+  else snake.pop();
+}
+
+function endGame(){
+  running=false; clearInterval(gLoop);
+  document.getElementById('g-score-disp').textContent='SCORE: '+score;
+  document.getElementById('g-over').classList.remove('hidden');
+  drawG();
+  GX.fillStyle='rgba(255,51,51,0.12)'; GX.fillRect(0,0,GCV.width,GCV.height);
+}
+
+function restartGame(){ clearInterval(gLoop); initGame(); }
+
+function gameDirBtn(d){
+  if(!started) startGame();
+  const m={UP:{x:0,y:-1},DOWN:{x:0,y:1},LEFT:{x:-1,y:0},RIGHT:{x:1,y:0}};
+  const nd=m[d];
+  if(nd.x===-dir.x&&nd.y===-dir.y) return;
+  nextDir=nd;
+  const ids={UP:'ab-up',DOWN:'ab-down',LEFT:'ab-left',RIGHT:'ab-right'};
+  const btn=document.getElementById(ids[d]);
+  if(btn){btn.classList.add('pressed');setTimeout(()=>btn.classList.remove('pressed'),150);}
+}
+
+function e_touch(e,d){ e.preventDefault(); gameDirBtn(d); }
+
+document.addEventListener('keydown',e=>{
+  const m={ArrowUp:'UP',ArrowDown:'DOWN',ArrowLeft:'LEFT',ArrowRight:'RIGHT'};
+  if(!m[e.key]) return; e.preventDefault(); gameDirBtn(m[e.key]);
+});
+
+// Animate food on start screen
+setInterval(()=>{ if(!running) drawG(); }, 80);
+initGame();
+
+// ─── Upload & File Handling ─────────────────────────────────
+const dropZone=document.getElementById('drop-zone'), fileInput=document.getElementById('file-input'), jobsContainer=document.getElementById('jobs');
+dropZone.addEventListener('click',e=>{ if(e.target.closest('.upload-scan-overlay')) return; fileInput.click(); });
+dropZone.addEventListener('dragover',e=>{ e.preventDefault(); dropZone.classList.add('hover'); });
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('hover'));
+dropZone.addEventListener('drop',e=>{ e.preventDefault(); dropZone.classList.remove('hover'); triggerUploadAnim(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change',()=>triggerUploadAnim(fileInput.files[0]));
+
+function triggerUploadAnim(file){
+  if(!file) return;
+  const ov=document.getElementById('upload-scan-overlay'), st=document.getElementById('scan-text'),
+        sf=document.getElementById('scan-filename'), ck=document.getElementById('scan-checkmark'),
+        rf=document.getElementById('scan-ring-fg');
+  rf.style.animation='none'; void rf.offsetWidth; rf.style.animation='';
+  ck.style.opacity='0'; st.textContent='ANALYZING FILE...'; sf.textContent=file.name;
+  ov.classList.add('active');
+  const msgs=['ANALYZING FILE...','READING HEADERS...','PARSING RECORDS...','ENCRYPTING JOB...','DISPATCHING...'];
+  let mi=0; const iv=setInterval(()=>{ mi=(mi+1)%msgs.length; st.textContent=msgs[mi]; },360);
+  setTimeout(()=>{
+    clearInterval(iv); st.textContent='FILE ACCEPTED'; ck.style.opacity='1';
+    setTimeout(()=>{ ov.classList.remove('active'); doUpload(file); }, 700);
+  }, 1900);
+}
+
+function doUpload(file){
+  const fd=new FormData(); fd.append('file',file);
+  fetch('http://localhost:5050/verify',{method:'POST',body:fd})
+    .then(r=>r.json()).then(({job_id})=>createJobBlock(job_id,file.name))
+    .catch(err=>{ alert("[ ERROR ] Failed to connect to verification server."); console.error(err); });
+}
+
+// ─── Side Monitor ────────────────────────────────────────────
+let mCnt=0,mV=0,mR=0,mI=0;
+function addMonitorLine(entry){
+  const feed=document.getElementById('side-feed'), idle=document.getElementById('monitor-idle');
+  if(idle) idle.remove();
+  document.getElementById('monitor-dot').classList.remove('idle');
+  let cls='risky';
+  if(entry.includes('→ valid'))  {cls='valid';   mV++;}
+  if(entry.includes('→ invalid')){cls='invalid'; mI++;}
+  if(cls==='risky') mR++;
+  mCnt++;
+  document.getElementById('monitor-count').textContent=mCnt+' entries';
+  document.getElementById('ms-valid').textContent=mV;
+  document.getElementById('ms-risky').textContent=mR;
+  document.getElementById('ms-invalid').textContent=mI;
+  const line=document.createElement('div');
+  line.className=`monitor-log-line ${cls}`;
+  line.innerHTML=`<div class="mdot"></div>${entry}`;
+  feed.appendChild(line); feed.scrollTop=feed.scrollHeight;
+  const all=feed.querySelectorAll('.monitor-log-line'); if(all.length>200) all[0].remove();
+}
+
+// ─── Job Block ───────────────────────────────────────────────
+function createJobBlock(job_id, fileName){
+  const block=document.createElement('div'); block.className='job-block';
+  block.innerHTML=`
+    <div class="job-header"><h3>${fileName}</h3><div class="close-job">✖</div></div>
+    <div class="progress-container"><div class="progress-bar" id="bar-${job_id}">0%</div></div>
+    <div class="current-email-banner" id="banner-${job_id}">
+      <div class="pulse-dot"></div><span class="label">SCANNING &gt;&gt;</span>
+      <span class="email-value" id="cemail-${job_id}">INITIALIZING...<span class="blink">_</span></span>
+    </div>
+    <div class="status" id="stat-${job_id}">&gt; AWAITING TARGET DATA...</div>
+    <div class="actions" id="act-${job_id}"><button class="btn-cancel" id="cncl-${job_id}">[ABORT SCAN]</button></div>
+    <div class="results-container" id="res-${job_id}"></div>`;
+  jobsContainer.prepend(block);
+
+  const bar=block.querySelector(`#bar-${job_id}`), statEl=block.querySelector(`#stat-${job_id}`),
+        actEl=block.querySelector(`#act-${job_id}`), cncl=block.querySelector(`#cncl-${job_id}`),
+        clsBtn=block.querySelector('.close-job'), cemEl=block.querySelector(`#cemail-${job_id}`),
+        banEl=block.querySelector(`#banner-${job_id}`), resDiv=block.querySelector(`#res-${job_id}`);
+  let canceled=false, logOff=0;
+
+  cncl.onclick=()=>{ canceled=true; fetch(`http://localhost:5050/cancel?job_id=${job_id}`,{method:'POST'}); statEl.innerHTML=`<span style="color:var(--r);">&gt; SCAN ABORTED BY OPERATOR</span>`; banEl.style.display='none'; actEl.innerHTML=''; };
+  clsBtn.onclick=()=>{ fetch(`http://localhost:5050/cancel?job_id=${job_id}`,{method:'POST'}); block.remove(); };
+
+  const pp=setInterval(()=>{
+    if(canceled) return clearInterval(pp);
+    fetch(`http://localhost:5050/progress?job_id=${job_id}`).then(r=>r.json()).then(d=>{
+      if(!d||typeof d.percent!=='number') return;
+      bar.style.width=d.percent+'%'; bar.textContent=d.percent+'%';
+      statEl.innerHTML=`<span class="spinner">⟳</span> PROCESSING TARGET ${d.row} / ${d.total}`;
+      if(d.current_email) cemEl.innerHTML=`${d.current_email}<span class="blink">_</span>`;
+    }).catch(()=>{});
+  }, 600);
+
+  const lp=setInterval(()=>{
+    if(canceled) return clearInterval(lp);
+    fetch(`http://localhost:5050/logs?job_id=${job_id}&offset=${logOff}`).then(r=>r.json()).then(d=>{
+      if(!d.entries||!d.entries.length) return;
+      d.entries.forEach(e=>addMonitorLine(e)); logOff+=d.entries.length;
+    }).catch(()=>{});
+  }, 700);
+
+  const dp=setInterval(()=>{
+    if(canceled) return clearInterval(dp);
+    fetch(`http://localhost:5050/progress?job_id=${job_id}`).then(r=>r.json()).then(d=>{
+      if(d&&d.percent>=100){
+        clearInterval(pp); clearInterval(lp); clearInterval(dp);
+        fetch(`http://localhost:5050/logs?job_id=${job_id}&offset=${logOff}`).then(r=>r.json()).then(d=>{ if(d.entries&&d.entries.length) d.entries.forEach(e=>addMonitorLine(e)); }).catch(()=>{});
+        document.getElementById('monitor-dot').classList.add('idle');
+        statEl.innerHTML=`<span style="color:var(--g);text-shadow:0 0 10px var(--g);">&gt; SCAN COMPLETE // ALL TARGETS PROCESSED</span>`;
+        banEl.style.display='none';
+        actEl.innerHTML=`
+          <a href="http://localhost:5050/download?job_id=${job_id}&type=all"          class="btn-download">[ALL LEADS]</a>
+          <a href="http://localhost:5050/download?job_id=${job_id}&type=valid"         class="btn-download">[VALID]</a>
+          <a href="http://localhost:5050/download?job_id=${job_id}&type=risky"         class="btn-download">[RISKY]</a>
+          <a href="http://localhost:5050/download?job_id=${job_id}&type=risky_invalid" class="btn-download">[RISKY+INVALID]</a>`;
+        fetch(`http://localhost:5050/stats?job_id=${job_id}`).then(r=>r.json()).then(stats=>showResults(job_id,stats,resDiv)).catch(()=>{});
+      }
+    }).catch(()=>{});
+  }, 1500);
+}
+
+// ─── Results ─────────────────────────────────────────────────
+function showResults(job_id, stats, container){
+  const total=stats.valid+stats.risky+stats.invalid;
+  container.innerHTML=`
+    <div class="stats-grid">
+      <div class="stat-card"><h4>${stats.valid}</h4><p>Valid Targets</p></div>
+      <div class="stat-card risky"><h4>${stats.risky}</h4><p>Risky Targets</p></div>
+      <div class="stat-card invalid"><h4>${stats.invalid}</h4><p>Dead Targets</p></div>
+      <div class="stat-card"><h4>${total}</h4><p>Total Scanned</p></div>
+    </div>
+    <div class="chart-wrapper">
+      <div class="chart-box"><h4>Distribution</h4><canvas id="bc-${job_id}"></canvas></div>
+      <div class="chart-box"><h4>Breakdown</h4><canvas id="pc-${job_id}"></canvas></div>
+    </div>
+    <div class="filter-panel">
+      <h4>Custom Download Filter</h4>
+      <p style="color:var(--gd);margin-bottom:20px;font-size:12px;letter-spacing:1px;">&gt; SELECT CRITERIA TO EXTRACT TARGETS:</p>
+      <div class="filter-section"><div class="filter-section-title">Status</div><div class="filter-grid" id="fs-${job_id}"></div></div>
+      <div class="filter-section"><div class="filter-section-title">Reason</div><div class="filter-grid" id="fr-${job_id}"></div></div>
+      <div class="filter-section"><div class="filter-section-title">Provider</div><div class="filter-grid" id="fp-${job_id}"></div></div>
+      <button class="download-custom" onclick="downloadCustom('${job_id}')">&gt; EXTRACT CUSTOM SELECTION_</button>
+    </div>`;
+  Chart.defaults.color='#00882a'; Chart.defaults.borderColor='#00441a';
+  const mg='#00ff41',my='#ffaa00',mr='#ff3333';
+  new Chart(document.getElementById(`bc-${job_id}`),{type:'bar',data:{labels:['VALID','RISKY','INVALID'],datasets:[{label:'Count',data:[stats.valid,stats.risky,stats.invalid],backgroundColor:['rgba(0,255,65,0.25)','rgba(255,170,0,0.25)','rgba(255,51,51,0.25)'],borderColor:[mg,my,mr],borderWidth:1}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#00882a',font:{family:'Share Tech Mono'}},grid:{color:'#001a05'}},y:{beginAtZero:true,ticks:{precision:0,color:'#00882a',font:{family:'Share Tech Mono'}},grid:{color:'#001a05'}}}}});
+  new Chart(document.getElementById(`pc-${job_id}`),{type:'doughnut',data:{labels:['VALID','RISKY','INVALID'],datasets:[{data:[stats.valid,stats.risky,stats.invalid],backgroundColor:['rgba(0,255,65,0.25)','rgba(255,170,0,0.25)','rgba(255,51,51,0.25)'],borderColor:[mg,my,mr],borderWidth:1}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{position:'bottom',labels:{color:'#00882a',font:{family:'Share Tech Mono'},padding:15}}}}});
+  buildFilters(job_id);
+}
+
+function buildFilters(job_id){
+  const sD=document.getElementById(`fs-${job_id}`), rD=document.getElementById(`fr-${job_id}`), pD=document.getElementById(`fp-${job_id}`);
+  ['valid','risky','invalid'].forEach(s=>{ sD.innerHTML+=`<div class="filter-item"><input type="checkbox" id="${job_id}-st-${s}" value="${s}" data-type="status"><label for="${job_id}-st-${s}">${s.toUpperCase()}</label></div>`; });
+  [['smtp_ok','SMTP_OK'],['catch_all','CATCH_ALL'],['smtp_timeout','SMTP_TIMEOUT'],['smtp_invalid','SMTP_INVALID']].forEach(([v,l])=>{ rD.innerHTML+=`<div class="filter-item"><input type="checkbox" id="${job_id}-re-${v}" value="${v}" data-type="reason"><label for="${job_id}-re-${v}">${l}</label></div>`; });
+  ['Google','Microsoft','Yahoo','Zoho','Other','Unknown'].forEach(p=>{ pD.innerHTML+=`<div class="filter-item"><input type="checkbox" id="${job_id}-pr-${p}" value="${p}" data-type="provider"><label for="${job_id}-pr-${p}">${p.toUpperCase()}</label></div>`; });
+  fetch(`http://localhost:5050/download?job_id=${job_id}&type=all`).then(r=>r.text()).then(csv=>{
+    const lines=csv.split('\n'), headers=lines[0].split(',');
+    window[`fd_${job_id}`]={csv,headers,si:headers.findIndex(h=>h.toLowerCase().includes('status')),ri:headers.findIndex(h=>h.toLowerCase().includes('reason')),pi:headers.findIndex(h=>h.toLowerCase().includes('provider'))};
+  });
+}
+
+function downloadCustom(job_id){
+  const cbs=document.querySelectorAll(`[id^="${job_id}-"]:checked`);
+  if(!cbs.length){alert('[ ERROR ] Select at least one filter criteria');return;}
+  const f={status:[],reason:[],provider:[]};
+  cbs.forEach(cb=>f[cb.getAttribute('data-type')].push(cb.value));
+  const d=window[`fd_${job_id}`], lines=d.csv.split('\n');
+  let out=[lines[0]];
+  for(let i=1;i<lines.length;i++){
+    const c=lines[i].split(','); if(c.length<3) continue;
+    const st=c[d.si]?.trim().toLowerCase(), re=c[d.ri]?.trim(), pr=c[d.pi]?.trim();
+    let ok=true;
+    if(f.status.length&&!f.status.includes(st)) ok=false;
+    if(f.reason.length&&!f.reason.includes(re)) ok=false;
+    if(f.provider.length&&!f.provider.includes(pr)) ok=false;
+    if(ok) out.push(lines[i]);
+  }
+  if(out.length===1){alert('[ NULL ] No targets match your filter criteria');return;}
+  const blob=new Blob([out.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=`extracted-${job_id}.csv`; a.click(); URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
